@@ -195,7 +195,7 @@ def main() -> int:
         return 1
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Service error: {error}", file=sys.stderr)
-        if plist.exists() or loaded_service(target).returncode == 0:
+        if (home / "Library" / "Logs" / LABEL).exists():
             print(f"Check logs in {home / 'Library' / 'Logs' / LABEL}", file=sys.stderr)
         return 1
     return 0
