@@ -180,8 +180,12 @@ for the service's Python process even when Terminal or VS Code already has it.
 
 #### macOS certificate install
 
+Certificate files under `certs/` are gitignored and are not in the repository.
+Only `certs/.gitkeep` is tracked so the directory exists after clone. Copy the
+certificates you need onto each machine yourself.
+
 The service installer also runs [install/macos/trust_certs.py](./install/macos/trust_certs.py),
-which installs public files from [certs](./certs) into your login keychain.
+which installs public files from that directory into your login keychain.
 You can run that trust step alone:
 
 ```bash
