@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Certificates — never commit these. Keep local copies under
+# router-admin-proxy/certs/ for the macOS trust script.
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+router-admin-proxy/certs/*
+!router-admin-proxy/certs/.gitkeep
