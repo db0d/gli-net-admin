@@ -69,8 +69,8 @@ cd /path/to/gli-net-admin/router-admin-proxy
 uv sync --frozen
 ```
 
-The project uses Python 3.12 by default (`.python-version`) and pins mitmproxy
-12.2.3 in `pyproject.toml`. `uv.lock` locks its transitive dependencies.
+The project uses Python 3.14 by default (`.python-version`) and pins mitmproxy
+12.3.1 in `pyproject.toml`. `uv.lock` locks its transitive dependencies.
 uv creates/manages `.venv` and can download Python if needed; no activation or
 manual pip installation is required. Keep the lockfile with the project.
 

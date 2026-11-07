@@ -3,9 +3,9 @@ name = "router-admin-proxy"
 version = "0.1.0"
 description = "Router-only HTTP Host rewriting with mitmproxy"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
-    "mitmproxy==12.2.3",
+    "mitmproxy==12.3.1",
 ]
 
 [tool.uv]
