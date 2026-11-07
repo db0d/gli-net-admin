@@ -37,7 +37,11 @@ def router_target() -> str:
 def tls_clienthello(data: tls.ClientHelloData) -> None:
     """Intercept only explicit router destinations, never based on SNI alone."""
     address = data.context.server.address
-    allowed = {_identity(router_destination()), _identity(router_target())}
+    try:
+        allowed = {_identity(router_destination()), _identity(router_target())}
+    except ConfigError:
+        data.ignore_connection = True
+        raise
     if address is None or _identity(address[0]) not in allowed:
         data.ignore_connection = True
 

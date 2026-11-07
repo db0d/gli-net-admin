@@ -90,7 +90,10 @@ def trust_certificates(
     keychain = login_keychain() if keychain is None else keychain
     report = TrustReport()
     for path in certificate_paths(certs_dir):
-        certificate = x509.load_pem_x509_certificate(path.read_bytes())
+        try:
+            certificate = x509.load_pem_x509_certificate(path.read_bytes())
+        except ValueError as error:
+            raise CertificateError(f"{path.name}: invalid PEM certificate: {error}") from error
         if is_certificate_authority(certificate):
             _run_security(
                 [

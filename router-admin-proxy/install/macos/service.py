@@ -136,9 +136,15 @@ def install(plist: Path, home: Path, domain: str, target: str) -> None:
         subprocess.run([LAUNCHCTL, "bootstrap", domain, str(plist)], check=True)
         wait_until_ready(target)
     except (OSError, RuntimeError, subprocess.CalledProcessError):
-        if loaded_service(target).returncode == 0:
-            subprocess.run([LAUNCHCTL, "bootout", target], check=True)
-        plist.unlink()
+        try:
+            if loaded_service(target).returncode == 0:
+                subprocess.run([LAUNCHCTL, "bootout", target], check=True)
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as cleanup_error:
+            print(f"Service rollback error: {cleanup_error}", file=sys.stderr)
+        try:
+            plist.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            print(f"Could not remove {plist}: {cleanup_error}", file=sys.stderr)
         raise
     for line in trust_certs.describe_report(report):
         print(line)
@@ -189,7 +195,7 @@ def main() -> int:
         return 1
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Service error: {error}", file=sys.stderr)
-        if plist.exists() or loaded_service(target).returncode == 0:
+        if (home / "Library" / "Logs" / LABEL).exists():
             print(f"Check logs in {home / 'Library' / 'Logs' / LABEL}", file=sys.stderr)
         return 1
     return 0
