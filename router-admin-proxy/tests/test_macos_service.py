@@ -109,7 +109,9 @@ class MacOSServiceTests(unittest.TestCase):
                 ]), patch.object(service.socket, "socket"), patch.object(
                     service.subprocess, "run"
                 ) as run, patch.object(
-                    service.trust_certs, "trust_certificates", return_value=[]
+                    service.trust_certs,
+                    "trust_certificates",
+                    return_value=service.trust_certs.TrustReport(),
                 ) as trust, patch.object(
                     service, "wait_until_ready",
                     side_effect=RuntimeError("not ready") if failed else None,
@@ -139,6 +141,16 @@ class MacOSServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already exists"):
                 service.install(plist, Path(tmp), "gui/502", "gui/502/test")
             self.assertEqual(plist.read_text(), "do not overwrite")
+
+    def test_install_refuses_root_owned_launch_agents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agents = Path(tmp) / "LaunchAgents"
+            agents.mkdir()
+            with patch.object(service.os, "access", return_value=False), patch.object(
+                Path, "owner", return_value="root"
+            ), patch.object(service.os, "getlogin", return_value="db0d"):
+                with self.assertRaisesRegex(RuntimeError, "sudo chown db0d:staff"):
+                    service.ensure_user_writable(agents)
 
     def test_uninstall_uses_current_user_and_preserves_other_files(self):
         with tempfile.TemporaryDirectory() as tmp:

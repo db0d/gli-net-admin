@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -16,7 +16,7 @@ import trust_certs
 
 
 class TrustCertificateTests(unittest.TestCase):
-    def test_trusts_ca_as_root_and_leaf_as_itself(self):
+    def test_trusts_ca_and_imports_leaf_without_trust_as_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             certs = Path(tmp) / "certs"
             certs.mkdir()
@@ -24,16 +24,59 @@ class TrustCertificateTests(unittest.TestCase):
             _write_certificate(certs / "ca.pem", "Local CA", ca=True)
             _write_certificate(certs / "router.pem", "router.example", ca=False)
             (certs / "notes.txt").write_text("ignored")
-            with patch.object(trust_certs.subprocess, "run") as run:
-                trusted = trust_certs.trust_certificates(certs, keychain)
+            with patch.object(
+                trust_certs.subprocess,
+                "run",
+                return_value=Mock(returncode=0, stdout="", stderr=""),
+            ) as run:
+                report = trust_certs.trust_certificates(certs, keychain)
 
-            self.assertEqual([path.name for path in trusted], ["ca.pem", "router.pem"])
+            self.assertEqual([path.name for path in report.trusted], ["ca.pem"])
+            self.assertEqual([path.name for path in report.imported], ["router.pem"])
             commands = {Path(call.args[0][-1]).name: call.args[0] for call in run.call_args_list}
-            self.assertEqual(commands["ca.pem"][3], "trustRoot")
-            self.assertEqual(commands["router.pem"][3], "trustAsRoot")
-            self.assertEqual(commands["router.pem"][5], "ssl")
-            self.assertEqual(commands["router.pem"][7], str(keychain))
-            self.assertEqual(commands["router.pem"][0], trust_certs.SECURITY)
+            self.assertEqual(
+                commands["ca.pem"],
+                [
+                    trust_certs.SECURITY,
+                    "add-trusted-cert",
+                    "-r",
+                    "trustRoot",
+                    "-p",
+                    "ssl",
+                    "-k",
+                    str(keychain),
+                    str(certs / "ca.pem"),
+                ],
+            )
+            self.assertEqual(
+                commands["router.pem"],
+                [
+                    trust_certs.SECURITY,
+                    "add-certificates",
+                    "-k",
+                    str(keychain),
+                    str(certs / "router.pem"),
+                ],
+            )
+            self.assertNotIn("trustAsRoot", " ".join(" ".join(call.args[0]) for call in run.call_args_list))
+
+    def test_already_present_certificates_are_treated_as_success(self):
+        messages = (
+            "SecCertificateAddToKeychain: The specified item already exists in the keychain.",
+            "security: /tmp/router.pem: already in /Users/example/Library/Keychains/login.keychain-db",
+        )
+        for message in messages:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as tmp:
+                certs = Path(tmp)
+                keychain = Path(tmp) / "login.keychain-db"
+                _write_certificate(certs / "router.pem", "router.example", ca=False)
+                with patch.object(
+                    trust_certs.subprocess,
+                    "run",
+                    return_value=Mock(returncode=1, stdout="", stderr=message),
+                ):
+                    report = trust_certs.trust_certificates(certs, keychain)
+                self.assertEqual([path.name for path in report.imported], ["router.pem"])
 
     def test_private_key_is_refused_before_any_certificate_is_trusted(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -48,8 +91,18 @@ class TrustCertificateTests(unittest.TestCase):
     def test_empty_directory_trusts_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(trust_certs.subprocess, "run") as run:
-                self.assertEqual(trust_certs.trust_certificates(Path(tmp), Path(tmp) / "login.keychain-db"), [])
+                report = trust_certs.trust_certificates(Path(tmp), Path(tmp) / "login.keychain-db")
+            self.assertFalse(report)
             run.assert_not_called()
+
+    def test_describe_report_explains_leaf_import(self):
+        report = trust_certs.TrustReport(
+            trusted=[Path("ca.pem")],
+            imported=[Path("router.pem")],
+        )
+        lines = trust_certs.describe_report(report)
+        self.assertTrue(any("Trusted for SSL" in line and "ca.pem" in line for line in lines))
+        self.assertTrue(any("without SSL trust settings" in line and "router.pem" in line for line in lines))
 
 
 def _write_certificate(path: Path, common_name: str, ca: bool) -> None:

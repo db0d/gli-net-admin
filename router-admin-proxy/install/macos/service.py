@@ -98,6 +98,21 @@ def wait_until_ready(target: str) -> None:
     raise RuntimeError(f"Service did not become ready: {last_error}")
 
 
+def ensure_user_writable(path: Path) -> None:
+    """Require that this user can create files under the LaunchAgents directory."""
+    directory = path if path.is_dir() else path.parent
+    if not directory.exists():
+        return
+    if os.access(directory, os.W_OK | os.X_OK):
+        return
+    owner = directory.owner()
+    raise RuntimeError(
+        f"{directory} is not writable by this user (owner: {owner}). "
+        "Do not use sudo with this installer. Fix ownership, then retry:\n"
+        f"  sudo chown {os.getlogin()}:staff {directory}"
+    )
+
+
 def install(plist: Path, home: Path, domain: str, target: str) -> None:
     if plist.exists() or loaded_service(target).returncode == 0:
         raise RuntimeError("Service already exists. Uninstall it before reinstalling.")
@@ -106,10 +121,11 @@ def install(plist: Path, home: Path, domain: str, target: str) -> None:
         raise RuntimeError("Run with: uv run --frozen python install/macos/service.py install")
     if not python.is_file():
         raise RuntimeError("Project environment is missing. Run uv sync --frozen.")
+    ensure_user_writable(plist.parent)
     # Refuse to compete with an existing interactive proxy or another service.
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 8080))
-    trusted = trust_certs.trust_certificates()
+    report = trust_certs.trust_certificates()
     definition = service_definition(PROJECT, home, python)
     plist.parent.mkdir(parents=True, exist_ok=True)
     (home / "Library" / "Logs" / LABEL).mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -124,11 +140,8 @@ def install(plist: Path, home: Path, domain: str, target: str) -> None:
             subprocess.run([LAUNCHCTL, "bootout", target], check=True)
         plist.unlink()
         raise
-    if trusted:
-        names = ", ".join(path.name for path in trusted)
-        print(f"Trusted for SSL in the login keychain: {names}")
-    else:
-        print(f"No certificates found in {trust_certs.CERTS}")
+    for line in trust_certs.describe_report(report):
+        print(line)
     print(f"Installed and responsive at 127.0.0.1:8080: {plist}")
 
 
@@ -136,8 +149,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "status", "uninstall"))
     args = parser.parse_args()
-    if sys.platform != "darwin" or os.getuid() == 0:
-        parser.error("Run as your normal logged-in macOS user, without sudo.")
+    if sys.platform != "darwin":
+        parser.error("This installer only supports macOS.")
+    if os.getuid() == 0:
+        parser.error(
+            "Do not use sudo. This is a per-user LaunchAgent and must run as your "
+            "normal logged-in macOS user. If ~/Library/LaunchAgents is root-owned, "
+            "fix it first with: sudo chown \"$(whoami)\":staff ~/Library/LaunchAgents"
+        )
     home = Path.home()
     plist = home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
     domain = f"gui/{os.getuid()}"
@@ -160,9 +179,18 @@ def main() -> int:
             print(
                 "Service removed. Logs, trusted certificates, project, and network settings retained."
             )
+    except trust_certs.CertificateError as error:
+        print(f"Certificate install error: {error}", file=sys.stderr)
+        print(
+            "The LaunchAgent was not installed. Fix the certificates in certs/ "
+            "or run: uv run --frozen python install/macos/trust_certs.py",
+            file=sys.stderr,
+        )
+        return 1
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Service error: {error}", file=sys.stderr)
-        print(f"Check logs in {home / 'Library' / 'Logs' / LABEL}", file=sys.stderr)
+        if plist.exists() or loaded_service(target).returncode == 0:
+            print(f"Check logs in {home / 'Library' / 'Logs' / LABEL}", file=sys.stderr)
         return 1
     return 0
 

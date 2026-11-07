@@ -143,10 +143,76 @@ Trusting a CA alone does not fix a hostname mismatch.
 [install/macos/service.py](./install/macos/service.py) installs a **LaunchAgent**,
 not a system daemon. It runs only in your logged-in GUI user session, starts at
 login, and restarts if the proxy exits. It does not run before login or after
-logout. Do **not** use `sudo`.
+logout.
 
 Service scripts are split by operating system: macOS is `install/macos`, and
 `install/linux` is the matching location for a Linux installer.
+
+#### macOS install permissions
+
+Do **not** run the installer with `sudo`. A per-user LaunchAgent must be
+installed as your normal logged-in account. Using `sudo` can leave
+`~/Library/LaunchAgents` owned by root, which then causes:
+
+```text
+Permission denied: '.../Library/LaunchAgents/local.router-admin-proxy.plist'
+```
+
+Before installing, confirm that directory is yours and writable:
+
+```bash
+ls -ld ~/Library/LaunchAgents
+# expected: ... db0d staff ... /Users/you/Library/LaunchAgents
+```
+
+If the owner is `root`, fix it once, then continue without sudo:
+
+```bash
+sudo chown "$(whoami)":staff ~/Library/LaunchAgents
+```
+
+Keep the project and `.venv` at a stable path outside macOS-protected
+Desktop/Documents/Downloads folders when you want unattended execution (for
+example `~/Projects/gli-net-admin`). The LaunchAgent stores absolute paths
+inside `router-admin-proxy/`. If you move the project, run `uv sync --frozen`
+and reinstall the service. macOS may also require **Local Network** permission
+for the service's Python process even when Terminal or VS Code already has it.
+
+#### macOS certificate install
+
+The service installer also runs [install/macos/trust_certs.py](./install/macos/trust_certs.py),
+which installs public files from [certs](./certs) into your login keychain.
+You can run that trust step alone:
+
+```bash
+uv run --frozen python install/macos/trust_certs.py
+```
+
+Rules for `certs/`:
+
+| File type | What the installer does |
+| --- | --- |
+| CA certificate (Basic Constraints CA=true) | Imports and trusts it for SSL. macOS may prompt for your login keychain password. |
+| Leaf certificate | Imports only. Recent macOS releases reject CLI trust settings for non-CA certificates. |
+| File containing a private key | Refused. |
+
+For intercepted HTTPS, put this mitmproxy instance's **public CA** in `certs/`
+before or after the first proxy start:
+
+```bash
+cp "$HOME/.mitmproxy/mitmproxy-ca-cert.pem" certs/mitmproxy-ca-cert.pem
+```
+
+`~/.mitmproxy/mitmproxy-ca-cert.pem` appears after mitmproxy's first startup.
+Leaf files such as `router.dbod.local.pem`, `mitm.it.pem`, and `127.0.0.1.pem`
+are issued by that CA and do not need separate SSL trust once the CA is
+trusted. If you must trust a leaf directly, open **Keychain Access**, find the
+certificate, and set **Trust → Secure Sockets Layer** to **Always Trust**.
+
+Certificate failures happen before the LaunchAgent is written, so there will
+not yet be logs under `~/Library/Logs/local.router-admin-proxy`.
+
+#### Install and verify
 
 Stop any interactive mitmproxy instance first; the installer refuses to proceed
 if port 8080 is already occupied. Then run:
@@ -156,10 +222,10 @@ uv run --frozen python install/macos/service.py install
 uv run --frozen python install/macos/service.py status
 ```
 
-Installation starts the service immediately and verifies that its local HTTP
-proxy responds. If startup fails, the installer unloads the new service and
-removes its plist; it reports the error and retains logs for diagnosis.
-An existing installation is not overwritten.
+Installation trusts eligible certificates, starts the service immediately, and
+verifies that the local HTTP proxy responds. If startup fails, the installer
+unloads the new service and removes its plist; it reports the error and retains
+logs for diagnosis. An existing installation is not overwritten.
 
 The service uses the same router-only addon, loopback listener, lazy connections,
 and `ssl_insecure=true` policy described above. Its plist records
@@ -169,6 +235,9 @@ directly from the project's `.venv`; launchd does not need uv on its PATH and
 does not download/install anything at login. It uses your existing
 `~/.mitmproxy` CA/configuration, so existing browser trust is preserved.
 Avoid adding global interception addons or settings to that configuration.
+
+The installer does **not** change system network proxy settings, DNS, or privacy
+permissions. Complete those steps below yourself.
 
 Installed files:
 
@@ -185,29 +254,6 @@ tail -f "$HOME/Library/Logs/local.router-admin-proxy/stdout.log" \
 Logs may contain router URLs and proxy errors. They are not automatically
 rotated; manage them as sensitive local diagnostics. No flow-dump file is enabled.
 
-**Permissions and location:** keep the project and `.venv` at a stable path.
-Prefer a location outside macOS-protected Desktop/Documents/Downloads folders
-for unattended execution (for example `~/Projects/gli-net-admin`). The
-LaunchAgent stores absolute paths inside `router-admin-proxy/`.
-If moving the project, recreate its environment with `uv sync --frozen` before
-installing. macOS may require Local Network permission for the service's Python
-process even when Terminal/VS Code already has permission. If launchd cannot
-read a protected project directory, move the project rather than assuming the
-terminal's permission carries over. Inspect the logs for access errors.
-
-The installer does **not** change system network proxy settings, DNS, or privacy
-permissions. It does trust the public certificates in [certs](./certs) for SSL
-in your login keychain. The same trust step can be run on its own:
-
-```bash
-uv run --frozen python install/macos/trust_certs.py
-```
-
-Put one public certificate in each `.pem`, `.crt`, or `.cer` file. A CA is
-trusted as a root. Any other certificate is trusted only as itself. Files that
-contain a private key are refused. macOS may prompt for your login keychain
-password. Complete the proxy and DNS steps below yourself.
-
 To remove the service, first disable your network HTTP/HTTPS proxy settings:
 
 ```bash
@@ -215,9 +261,9 @@ uv run --frozen python install/macos/service.py uninstall
 ```
 
 Uninstall unloads only this user's job and deletes its plist. It retains the
-project, logs, keychain trust, and network settings. To reinstall/restart after changes,
-uninstall and install again. If you move the project or recreate `.venv`,
-reinstall the service so its absolute paths remain correct.
+project, logs, keychain trust, and network settings. To reinstall/restart after
+changes, uninstall and install again. If you move the project or recreate
+`.venv`, reinstall the service so its absolute paths remain correct.
 
 ## 4. Route browser traffic through the network's HTTP/HTTPS proxy
 
@@ -259,20 +305,16 @@ policies, or VPN software may override them.
 
 The browser must trust mitmproxy's certificate for the intercepted router.
 This is separate from mitmproxy accepting the router's self-signed certificate.
+Follow the [macOS certificate install](#macos-certificate-install) rules above
+when using the LaunchAgent or `install/macos/trust_certs.py`.
 
-Certificates already exported into `certs/` are trusted when you install the
-LaunchAgent, or when you run `install/macos/trust_certs.py` directly. To trust
-the CA generated by this mitmproxy instance, copy only its public certificate
-into that directory:
+If you prefer the browser helper page instead:
 
-```bash
-cp "$HOME/.mitmproxy/mitmproxy-ca-cert.pem" certs/mitmproxy-ca-cert.pem
-uv run --frozen python install/macos/trust_certs.py
-```
-
-`~/.mitmproxy/mitmproxy-ca-cert.pem` appears after mitmproxy's first startup.
-You can also visit **http://mitm.it** through the proxy and follow its macOS
-instructions. Restart Chrome if needed.
+1. With the proxy running and system HTTP/HTTPS proxy settings enabled, visit
+   **http://mitm.it** (HTTP, not HTTPS).
+2. Follow its macOS certificate installation instructions, or copy
+   `~/.mitmproxy/mitmproxy-ca-cert.pem` into `certs/` and rerun the trust script.
+3. Restart Chrome if needed.
 
 Only install your own locally generated mitmproxy CA. Do not share the CA's
 private key or import a private-key file into the browser. The trust script
@@ -316,6 +358,9 @@ certificate even though mitmproxy is configured to accept the router's.
 
 | Symptom | Check |
 | --- | --- |
+| `Permission denied` on `~/Library/LaunchAgents/...plist` | `~/Library/LaunchAgents` is likely root-owned from a previous `sudo` install. Run `sudo chown "$(whoami)":staff ~/Library/LaunchAgents`, then install again **without** sudo. |
+| `SecTrustSettingsSetTrustSettings: One or more parameters...` | A leaf certificate was passed to CLI trust settings. Put a CA (such as `mitmproxy-ca-cert.pem`) in `certs/`, or trust leaves manually in Keychain Access. |
+| Certificate error, no LaunchAgent logs | Certificate install runs before the service is written; fix `certs/` first. |
 | `ERR_TUNNEL_CONNECTION_FAILED` or CONNECT 502 | Check mitmproxy's event log (`E` in the terminal UI), or the LaunchAgent logs if running as a service. This can occur before ClientHello. |
 | `No route to host` | Check macOS Local Network permission for the launching application, LAN connectivity, router IP, VPN, and firewall settings. |
 | Upstream self-signed certificate verification error | Confirm this dedicated instance was started with `ssl_insecure=true`, or configure verified upstream trust as described above. |
