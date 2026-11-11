@@ -1,0 +1,35 @@
+name: Test
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests (router-admin-proxy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: router-admin-proxy
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          python-version: "3.14"
+          working-directory: router-admin-proxy
+
+      - name: Sync locked dependencies
+        run: uv sync --frozen
+
+      - name: Run unit tests
+        run: uv run --frozen python -m unittest discover -s tests -v

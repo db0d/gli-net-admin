@@ -1,0 +1,45 @@
+name: Build
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Sync ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: root
+            path: .
+          - project: router-admin-proxy
+            path: router-admin-proxy
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          python-version: "3.14"
+          working-directory: ${{ matrix.path }}
+
+      - name: Sync locked dependencies
+        run: uv sync --frozen
+
+      - name: Verify runtime
+        run: |
+          uv run --frozen python -c 'import sys; print(sys.version)'
+          test "$(uv run --frozen python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.14"
