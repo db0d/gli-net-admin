@@ -667,8 +667,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mitmproxy", specifier = "==12.3.1" },
-    { name = "tornado", specifier = "==6.5.9" },
+    { name = "mitmproxy", specifier = ">=12.3.1" },
+    { name = "tornado", specifier = ">=6.5.9" },
 ]
 
 [[package]]
