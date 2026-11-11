@@ -9,3 +9,10 @@ Administrative tools for a GL.iNet Router
 [router-admin-proxy](./router-admin-proxy) is an explicit mitmproxy proxy for the router admin UI. The router's web configuration rejects a DNS name in the HTTP `Host` header, so the proxy rewrites that header for one configured destination and leaves every other TLS connection untouched.
 
 DNS, the macOS LaunchAgent, certificate trust, and the local network setup are documented in [router-admin-proxy/README.md](./router-admin-proxy/README.md).
+
+## CI
+
+GitHub Actions workflows under [`.github/workflows`](./.github/workflows) run on pushes and pull requests:
+
+- **Build** syncs locked dependencies for the root project and `router-admin-proxy` on Python 3.14
+- **Test** runs `router-admin-proxy` unit tests with `uv run --frozen python -m unittest discover -s tests`
